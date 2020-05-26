@@ -3,14 +3,15 @@ import os
 import unittest
 import zipfile
 
-from gnes.encoder.image.base import BasePytorchEncoder
-from gnes.preprocessor.base import BaseUnaryPreprocessor
+from gnes.encoder.base import BaseEncoder
+from gnes.preprocessor.base import UnaryPreprocessor, PipelinePreprocessor
+from gnes.preprocessor.image.resize import ResizeChunkPreprocessor
 from gnes.preprocessor.image.sliding_window import VanillaSlidingPreprocessor
 from gnes.proto import gnes_pb2, blob2array
 
 
 def img_process_for_test(dirname):
-    zipfile_ = zipfile.ZipFile(os.path.join(dirname, 'imgs/test.zip'), "r")
+    zipfile_ = zipfile.ZipFile(os.path.join(dirname, 'imgs/test.zip'))
     all_bytes = [zipfile_.open(v).read() for v in zipfile_.namelist()]
     test_img = []
     for raw_bytes in all_bytes:
@@ -19,8 +20,15 @@ def img_process_for_test(dirname):
         test_img.append(d)
 
     test_img_all_preprocessor = []
-    for preprocessor in [BaseUnaryPreprocessor(doc_type=gnes_pb2.Document.IMAGE),
-                         VanillaSlidingPreprocessor()]:
+    pipline_prep1 = PipelinePreprocessor()
+    pipline_prep1.components = lambda: [UnaryPreprocessor(doc_type=gnes_pb2.Document.IMAGE),
+                                        ResizeChunkPreprocessor()]
+    pipline_prep2 = PipelinePreprocessor()
+    pipline_prep2.components = lambda: [VanillaSlidingPreprocessor(),
+                                        ResizeChunkPreprocessor()]
+
+    for preprocessor in [pipline_prep1,
+                         pipline_prep2]:
         test_img_copy = copy.deepcopy(test_img)
         for img in test_img_copy:
             preprocessor.apply(img)
@@ -41,7 +49,7 @@ class TestImageEncoder(unittest.TestCase):
         self.mobilenet_yaml = os.path.join(dirname, 'yaml', 'mobilenet-encoder.yml')
 
     def test_vgg_encoding(self):
-        self.encoder = BasePytorchEncoder.load_yaml(self.vgg_yaml)
+        self.encoder = BaseEncoder.load_yaml(self.vgg_yaml)
         for test_img in self.test_img:
             vec = self.encoder.encode(test_img)
             print("the length of data now is:", len(test_img))
@@ -49,7 +57,7 @@ class TestImageEncoder(unittest.TestCase):
             self.assertEqual(vec.shape[1], 4096)
 
     def test_resnet_encoding(self):
-        self.encoder = BasePytorchEncoder.load_yaml(self.res_yaml)
+        self.encoder = BaseEncoder.load_yaml(self.res_yaml)
         for test_img in self.test_img:
             vec = self.encoder.encode(test_img)
             print("the length of data now is:", len(test_img))
@@ -57,7 +65,7 @@ class TestImageEncoder(unittest.TestCase):
             self.assertEqual(vec.shape[1], 2048)
 
     def test_inception_encoding(self):
-        self.encoder = BasePytorchEncoder.load_yaml(self.inception_yaml)
+        self.encoder = BaseEncoder.load_yaml(self.inception_yaml)
         for test_img in self.test_img:
             vec = self.encoder.encode(test_img)
             print("the length of data now is:", len(test_img))
@@ -65,7 +73,7 @@ class TestImageEncoder(unittest.TestCase):
             self.assertEqual(vec.shape[1], 2048)
 
     def test_mobilenet_encoding(self):
-        self.encoder = BasePytorchEncoder.load_yaml(self.mobilenet_yaml)
+        self.encoder = BaseEncoder.load_yaml(self.mobilenet_yaml)
         for test_img in self.test_img:
             vec = self.encoder.encode(test_img)
             print("the length of data now is:", len(test_img))
@@ -73,11 +81,11 @@ class TestImageEncoder(unittest.TestCase):
             self.assertEqual(vec.shape[1], 1280)
 
     def test_dump_load(self):
-        self.encoder = BasePytorchEncoder.load_yaml(self.vgg_yaml)
+        self.encoder = BaseEncoder.load_yaml(self.vgg_yaml)
 
         self.encoder.dump(self.dump_path)
 
-        vgg_encoder2 = BasePytorchEncoder.load(self.dump_path)
+        vgg_encoder2 = BaseEncoder.load(self.dump_path)
 
         for test_img in self.test_img:
             vec = vgg_encoder2.encode(test_img)

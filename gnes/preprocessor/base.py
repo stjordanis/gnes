@@ -13,44 +13,75 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# pylint: disable=low-comment-ratio
-import ctypes
+
 import io
-import random
 
 import numpy as np
-from PIL import Image
 
-from ..base import TrainableBase
+from ..base import TrainableBase, CompositionalTrainableBase
 from ..proto import gnes_pb2, array2blob
 
 
 class BasePreprocessor(TrainableBase):
     doc_type = gnes_pb2.Document.UNKNOWN
 
-    def __init__(self, start_doc_id: int = 0, random_doc_id: bool = True, *args, **kwargs):
+    def __init__(self,
+                 uniform_doc_weight: bool = True,
+                 *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.start_doc_id = start_doc_id
-        self.random_doc_id = random_doc_id
+
+        self.uniform_doc_weight = uniform_doc_weight
 
     def apply(self, doc: 'gnes_pb2.Document') -> None:
-        doc.doc_id = self.start_doc_id if not self.random_doc_id else random.randint(0, ctypes.c_uint(-1).value)
         doc.doc_type = self.doc_type
+        if not doc.weight and self.uniform_doc_weight:
+            doc.weight = 1.0
 
 
-class BaseUnaryPreprocessor(BasePreprocessor):
+class BaseTextPreprocessor(BasePreprocessor):
+    doc_type = gnes_pb2.Document.TEXT
+
+
+class BaseAudioPreprocessor(BasePreprocessor):
+    doc_type = gnes_pb2.Document.AUDIO
+
+
+class BaseImagePreprocessor(BasePreprocessor):
+    doc_type = gnes_pb2.Document.IMAGE
+
+
+class BaseVideoPreprocessor(BasePreprocessor):
+    doc_type = gnes_pb2.Document.VIDEO
+
+
+class PipelinePreprocessor(CompositionalTrainableBase):
+    def apply(self, doc: 'gnes_pb2.Document') -> None:
+        if not self.components:
+            raise NotImplementedError
+        for be in self.components:
+            be.apply(doc)
+
+    def train(self, data, *args, **kwargs):
+        if not self.components:
+            raise NotImplementedError
+        for idx, be in enumerate(self.components):
+            be.train(data, *args, **kwargs)
+            if idx + 1 < len(self.components):
+                data = be.apply(data, *args, **kwargs)
+
+
+class UnaryPreprocessor(BasePreprocessor):
+    is_trained = True
 
     def __init__(self, doc_type: int, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.target_img_size = 224
-        self.is_trained = True
         self.doc_type = doc_type
 
     def apply(self, doc: 'gnes_pb2.Document'):
         super().apply(doc)
         c = doc.chunks.add()
         c.doc_id = doc.doc_id
-        c.offset_1d = 0
+        c.offset = 0
         c.weight = 1.
         if doc.raw_bytes:
             self.raw_to_chunk(c, doc.raw_bytes)
@@ -61,10 +92,25 @@ class BaseUnaryPreprocessor(BasePreprocessor):
         if self.doc_type == gnes_pb2.Document.TEXT:
             chunk.text = raw_bytes.decode()
         elif self.doc_type == gnes_pb2.Document.IMAGE:
+            from PIL import Image
             img = np.array(Image.open(io.BytesIO(raw_bytes)))
-            img = np.array(Image.fromarray(img).resize((self.target_img_size, self.target_img_size)))
             chunk.blob.CopyFrom(array2blob(img))
         elif self.doc_type == gnes_pb2.Document.VIDEO:
             raise NotImplementedError
         else:
             raise NotImplementedError
+
+
+class RawChunkPreprocessor(BasePreprocessor):
+    
+    @staticmethod
+    def _parse_chunk(chunk: 'gnes_pb2.Chunk', *args, **kwargs):
+        raise NotImplementedError
+
+    def apply(self, doc: 'gnes_pb2.Document') -> None:
+        if doc.raw_bytes:
+            for chunk in doc.chunks:
+                chunk.raw = self._parse_chunk(chunk)
+        else:
+            self.logger.error('bad document: "raw_bytes" is empty!')
+

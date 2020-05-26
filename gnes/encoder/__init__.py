@@ -13,8 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# pylint: disable=low-comment-ratio
-
 
 # A key-value map for Class to the (module)file it located in
 from ..base import register_all_class
@@ -23,10 +21,7 @@ _cls2file_map = {
     'BertEncoder': 'text.bert',
     'BertEncoderWithServer': 'text.bert',
     'BertEncoderServer': 'text.bert',
-    'ElmoEncoder': 'text.elmo',
     'FlairEncoder': 'text.flair',
-    'GPTEncoder': 'text.gpt',
-    'GPT2Encoder': 'text.gpt',
     'PCALocalEncoder': 'numeric.pca',
     'PQEncoder': 'numeric.pq',
     'TFPQEncoder': 'numeric.tf_pq',
@@ -34,13 +29,25 @@ _cls2file_map = {
     'BaseEncoder': 'base',
     'BaseBinaryEncoder': 'base',
     'BaseTextEncoder': 'base',
+    'BaseVideoEncoder': 'base',
     'BaseNumericEncoder': 'base',
-    'CompositionalEncoder': 'base',
+    'BaseAudioEncoder': 'base',
     'PipelineEncoder': 'base',
     'HashEncoder': 'numeric.hash',
-    'BasePytorchEncoder': 'image.base',
+    'TorchvisionEncoder': 'image.torchvision',
     'TFInceptionEncoder': 'image.inception',
-    'CVAEEncoder': 'image.cvae'
+    'CVAEEncoder': 'image.cvae',
+    'IncepMixtureEncoder': 'video.incep_mixture',
+    'VladEncoder': 'numeric.vlad',
+    'MfccEncoder': 'audio.mfcc',
+    'PoolingEncoder': 'numeric.pooling',
+    'PyTorchTransformers': 'text.transformer',
+    'VggishEncoder': 'audio.vggish',
+    'YouTube8MFeatureExtractor': 'video.yt8m_feature_extractor',
+    'YouTube8MEncoder': 'video.yt8m_model',
+    'InceptionVideoEncoder': 'video.inception',
+    'QuantizerEncoder': 'numeric.quantizer',
+    'CharEmbeddingEncoder': 'text.char'
 }
 
 register_all_class(_cls2file_map, 'encoder')

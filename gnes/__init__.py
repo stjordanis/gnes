@@ -13,8 +13,11 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# pylint: disable=low-comment-ratio
 
-# do not change this line
-# this is managed by git tag and replaced on every release
-__version__ = '0.0.25'
+# do not change this line manually
+# this is managed by git tag and updated on every release
+__version__ = '0.0.46'
+
+# do not change this line manually
+# this is managed by shell/make-proto.sh and updated on every execution
+__proto_version__ = '0.0.10'

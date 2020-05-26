@@ -3,6 +3,7 @@
 # Requirements
 # brew install hub
 # npm install -g git-release-notes
+# pip install twine
 
 set -e
 
@@ -76,9 +77,18 @@ function make_release_note {
 }
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
 if [[ "$BRANCH" != "master" ]]; then
   printf "You are not at master branch, exit\n";
   exit 1;
+fi
+
+LAST_UPDATE=`git show --no-notes --format=format:"%H" $BRANCH | head -n 1`
+LAST_COMMIT=`git show --no-notes --format=format:"%H" origin/$BRANCH | head -n 1`
+
+if [ $LAST_COMMIT != $LAST_UPDATE ]; then
+    printf "Your local $BRANCH is behind the remote master, exit\n"
+    exit 1;
 fi
 
 if [[ -z "${BOT_URL}" ]]; then
@@ -86,6 +96,10 @@ if [[ -z "${BOT_URL}" ]]; then
   exit 1;
 fi
 
+if [[ -z "${GITHUB_TOKEN}" ]]; then
+  printf "GITHUB_TOKEN is not set! Need to export GITHUB_TOKEN=xxx"
+  exit 1;
+fi
 
 #$(grep "$VER_TAG" $CLIENT_CODE | sed -n 's/^.*'\''\([^'\'']*\)'\''.*$/\1/p')
 OLDVER=$(git tag -l | sort -V |tail -n1)
@@ -107,8 +121,6 @@ then
     change_line "$VER_TAG" "$VER_VAL" $INIT_FILE
     pub_pypi
     pub_gittag
-    # change the version line back
-#    mv ${TMP_INIT_FILE} $INIT_FILE
     make_chore_pr $VER
 fi
 

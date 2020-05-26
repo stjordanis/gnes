@@ -25,19 +25,20 @@ message Chunk {
 
         // the original ndarry of the chunk (apply to image/video documents)
         NdArray blob = 3;
-    }
 
-    message Coordinate {
-        repeated uint32 x = 1 [packed = true];
+        // raw bytes of chunk;
+        bytes raw = 7;
     }
 
     // the 1-dim offset of the chunk wrt. the document (apply to text document)
-    uint32 offset_1d = 4;
+    uint32 offset = 4;
 
     // the n-dim offset of the chunk wrt. the document (apply to image/video document)
-    Coordinate offset_nd = 5;
+    repeated uint32 offset_nd = 5 [packed = true];
 
     float weight = 6;
+
+    NdArray embedding = 8;
 }
 
 message Document {
@@ -47,28 +48,26 @@ message Document {
     // list of the chunks of the document
     repeated Chunk chunks = 2;
 
-    // the vector encode of this chunk
-    NdArray chunk_embeddings = 3;
-
     enum DocType {
         UNKNOWN = 0;
         TEXT = 1;
         IMAGE = 2;
         VIDEO = 3;
+        AUDIO = 4;
     }
 
     // document type
-    DocType doc_type = 4;
+    DocType doc_type = 3;
 
     // meta information of this document
-    bytes meta_info = 5;
+    bytes meta_info = 4;
 
     // raw information of this document
     oneof raw_data {
-        string raw_text = 6;
-        NdArray raw_image = 7;
-        NdArray raw_video = 8;
-        bytes raw_bytes = 9;  // for other types
+        string raw_text = 5;
+        NdArray raw_image = 6;
+        NdArray raw_video = 7;
+        bytes raw_bytes = 8; // for other types
     }
 
     float weight = 10;
@@ -79,20 +78,30 @@ message Envelope {
     string client_id = 1;
 
     // unique id of the request
-    string request_id = 2;
+    uint32 request_id = 2;
 
     // for multi-part message
     uint32 part_id = 3;
-    uint32 num_part = 4;
+    repeated uint32 num_part = 4;
 
     uint32 timeout = 5;
 
     // list of string represent the route of the message
     message route {
         string service = 1;
-        google.protobuf.Timestamp timestamp = 2;
+        google.protobuf.Timestamp start_time = 2;
+        google.protobuf.Timestamp end_time = 3;
+        google.protobuf.Timestamp first_start_time = 4;
+        google.protobuf.Timestamp last_end_time = 5;
+        string service_identity = 6;
     }
     repeated route routes = 6;
+
+    string gnes_version = 7;
+
+    string proto_version = 8;
+
+    string vcs_version = 9;
 }
 
 message Message {
@@ -106,7 +115,7 @@ message Message {
 
 // define Request
 message Request {
-    string request_id = 1;
+    uint32 request_id = 1;
 
     oneof body {
         TrainRequest train = 2;
@@ -141,7 +150,7 @@ message Request {
 
 // define Response
 message Response {
-    string request_id = 1;
+    uint32 request_id = 1;
 
 
     oneof body {
@@ -155,6 +164,7 @@ message Response {
         SUCCESS = 0;
         ERROR = 1;
         PENDING = 2;
+        READY = 3;
     }
 
     message TrainResponse {
@@ -176,22 +186,19 @@ message Response {
                 Document doc = 2;
             }
 
-            float score = 3;
-            string score_explained = 4;
+            Score score = 3;
+
+            message Score {
+                float value = 1;
+                string explained = 2;
+            }
         }
 
         Status status = 1;
         uint32 top_k = 2;
         repeated ScoredResult topk_results = 3;
-
-        enum ResponseLevel {
-            CHUNK = 0;
-            DOCUMENT_NOT_FILLED = 1;
-            DOCUMENT = 2;
-        }
-
-        ResponseLevel level = 4;
-
+        bool is_big_score_similar = 4;
+        bool is_sorted = 5;
     }
 }
 

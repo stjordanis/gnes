@@ -22,14 +22,14 @@ Together they define the behavior of a GNES system. Roughly speaking,
  
 ```yaml
 !PipelineEncoder
-component:
+components:
   - !Word2VecEncoder
-    parameter:
+    parameters:
       model_dir: /ext_data/sgns.wiki.bigram-char.refine
     property:
       is_trained: true
   - !PCALocalEncoder
-    parameter:
+    parameters:
       output_dim: 200
       num_locals: 10
     property:
@@ -40,23 +40,22 @@ One can also append extra component to this pipeline, e.g. adding quantization.
 
 ```yaml
 !PipelineEncoder
-component:
+components:
   - !Word2VecEncoder
-    parameter:
+    parameters:
       model_dir: /ext_data/sgns.wiki.bigram-char.refine
     property:
       is_trained: true
   - !PCALocalEncoder
-    parameter:
+    parameters:
       output_dim: 200
       num_locals: 10
     property:
       batch_size: 2048
   - !PQEncoder
-    parameter:
+    parameters:
       cluster_per_byte: 20
       num_bytes: 10
-
 ```
 
 

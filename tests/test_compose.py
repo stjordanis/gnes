@@ -4,6 +4,7 @@ import unittest
 from gnes.cli.parser import set_composer_parser, set_composer_flask_parser
 from gnes.composer.base import YamlComposer
 from gnes.composer.flask import YamlComposerFlask
+from gnes.composer.http import YamlComposerHttp
 
 
 class TestCompose(unittest.TestCase):
@@ -34,13 +35,13 @@ class TestCompose(unittest.TestCase):
         print(a.build_dockerswarm(r))
 
     @unittest.SkipTest
+    def test_http_local(self):
+        args = set_composer_flask_parser().parse_args(['--serve'])
+        YamlComposerHttp(args).run()
+
+    @unittest.SkipTest
     def test_flask_local(self):
-        yaml_path = os.path.join(self.dirname, 'yaml', 'topology1.yml')
-        args = set_composer_flask_parser().parse_args([
-            '--flask',
-            '--yaml_path', yaml_path,
-            '--html_path', self.html_path
-        ])
+        args = set_composer_flask_parser().parse_args(['--flask'])
         YamlComposerFlask(args).run()
 
     def test_flask(self):

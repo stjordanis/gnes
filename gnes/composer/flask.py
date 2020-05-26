@@ -13,9 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import tempfile
-
-from .base import YamlComposer
+from .base import YamlComposer, parse_http_data
 from ..cli.parser import set_composer_parser
 from ..helper import set_logger
 
@@ -28,38 +26,31 @@ class YamlComposerFlask:
     def _create_flask_app(self):
         try:
             from flask import Flask, request
-            from flask_compress import Compress
-            from flask_cors import CORS
         except ImportError:
             raise ImportError('Flask or its dependencies are not fully installed, '
                               'they are required for serving HTTP requests.'
-                              'Please use "pip install gnes[http]" to install it.')
+                              'Please use "pip install gnes[flask]" to install it.')
 
-        # support up to 10 concurrent HTTP requests
         app = Flask(__name__)
+        args = set_composer_parser().parse_args([])
+        default_html = YamlComposer(args).build_all()['html']
+
+        @app.errorhandler(500)
+        def exception_handler(error):
+            self.logger.error('unhandled error, i better quit and restart! %s' % error)
+            return '<h1>500 Internal Error</h1> ' \
+                   'While we are fixing the issue, do you know you can deploy GNES board locally on your machine? ' \
+                   'Simply run <pre>docker run -d -p 0.0.0.0:80:8080/tcp gnes/gnes compose --flask</pre>', 500
 
         @app.route('/', methods=['GET'])
         def _get_homepage():
-            return YamlComposer(set_composer_parser().parse_args([])).build_all()['html']
+            return default_html
 
         @app.route('/generate', methods=['POST'])
         def _regenerate():
             data = request.form if request.form else request.json
-            if not data or 'yaml-config' not in data:
-                return '<h1>Bad POST request</h1> your POST request does not contain "yaml-config" field!', 406
-            f = tempfile.NamedTemporaryFile('w', delete=False).name
-            with open(f, 'w', encoding='utf8') as fp:
-                fp.write(data['yaml-config'])
-            try:
-                return YamlComposer(set_composer_parser().parse_args([
-                    '--yaml_path', f
-                ])).build_all()['html']
-            except Exception as e:
-                self.logger.error(e)
-                return '<h1>Bad YAML input</h1> please kindly check the format, indent and content of your YAML file!', 400
+            return parse_http_data(data, args)
 
-        CORS(app, origins=self.args.cors)
-        Compress().init_app(app)
         return app
 
     def run(self):

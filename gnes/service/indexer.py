@@ -13,8 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# pylint: disable=low-comment-ratio
-
 import numpy as np
 
 from .base import BaseService as BS, MessageHandler, ServiceError
@@ -26,90 +24,96 @@ class IndexerService(BS):
 
     def post_init(self):
         from ..indexer.base import BaseIndexer
+        # print('id: %s, before: %r' % (threading.get_ident(), self._model))
         self._model = self.load_model(BaseIndexer)
+        # self._tmp_a = threading.get_ident()
+        # print('id: %s, after: %r, self._tmp_a: %r' % (threading.get_ident(), self._model, self._tmp_a))
 
     @handler.register(gnes_pb2.Request.IndexRequest)
     def _handler_index(self, msg: 'gnes_pb2.Message'):
-        all_vecs = []
-        doc_ids = []
-        offsets = []
-        weights = []
+        # print('tid: %s, model: %r, self._tmp_a: %r' % (threading.get_ident(), self._model, self._tmp_a))
+        # if self._tmp_a != threading.get_ident():
+        #     print('!!! tid: %s, tmp_a: %r %r' % (threading.get_ident(), self._tmp_a, self._handler_index))
+        from ..indexer.base import BaseChunkIndexer, BaseDocIndexer
+        if isinstance(self._model, BaseChunkIndexer):
+            is_changed = self._handler_chunk_index(msg)
+        elif isinstance(self._model, BaseDocIndexer):
+            is_changed = self._handler_doc_index(msg)
+        else:
+            raise ServiceError(
+                'unsupported indexer, dont know how to use %s to handle this message' % self._model.__bases__)
+
+        if self.args.as_response:
+            msg.response.index.status = gnes_pb2.Response.SUCCESS
+
+        if is_changed:
+            self.is_model_changed.set()
+
+    def _handler_chunk_index(self, msg: 'gnes_pb2.Message') -> bool:
+        embed_info = []
 
         for d in msg.request.index.docs:
-            if len(d.chunks):
-                all_vecs.append(blob2array(d.chunk_embeddings))
-                doc_ids += [d.doc_id] * len(d.chunks)
-                if d.doc_type == gnes_pb2.Document.TEXT:
-                    offsets += [c.offset_1d for c in d.chunks]
-                elif d.doc_type == gnes_pb2.Document.IMAGE:
-                    offsets += [c.offset_nd for c in d.chunks]
-                elif d.doc_type == gnes_pb2.Document.VIDEO:
-                    offsets += [c.offset_1d for c in d.chunks]
-                weights += [c.weight for c in d.chunks]
+            if not d.chunks:
+                self.logger.warning('document (doc_id=%s) contains no chunks!' % d.doc_id)
+                continue
 
-        from ..indexer.base import BaseVectorIndexer, BaseTextIndexer
-        if isinstance(self._model, BaseVectorIndexer):
-            self._model.add(list(zip(doc_ids, offsets)),
-                            np.concatenate(all_vecs, 0),
-                            weights)
-        elif isinstance(self._model, BaseTextIndexer):
+            embed_info += [(blob2array(c.embedding), d.doc_id, c.offset, c.weight) for c in d.chunks if
+                           c.embedding.data]
+
+        if embed_info:
+            vecs, doc_ids, offsets, weights = zip(*embed_info)
+            self._model.add(list(zip(doc_ids, offsets)), np.stack(vecs), weights)
+            return True
+        else:
+            self.logger.warning('chunks contain no embedded vectors, the indexer will do nothing')
+            return False
+
+    def _handler_doc_index(self, msg: 'gnes_pb2.Message') -> bool:
+        if msg.request.index.docs:
             self._model.add([d.doc_id for d in msg.request.index.docs],
                             [d for d in msg.request.index.docs],
                             [d.weight for d in msg.request.index.docs])
+            return True
+        else:
+            return False
 
-        msg.response.index.status = gnes_pb2.Response.SUCCESS
-        self.is_model_changed.set()
+    def _put_result_into_message(self, results, msg: 'gnes_pb2.Message'):
+        msg.response.search.ClearField('topk_results')
+        msg.response.search.topk_results.extend(results)
+        msg.response.search.top_k = len(results)
+        msg.response.search.is_big_score_similar = self._model.is_big_score_similar
 
     @handler.register(gnes_pb2.Request.QueryRequest)
     def _handler_chunk_search(self, msg: 'gnes_pb2.Message'):
-        def _cal_offset_relevance(q_offset, i_offset):
-            import math
-            if not isinstance(q_offset, list) and isinstance(i_offset, list):
-                raise TypeError("Type of qc_offset and offset is supposed to be (list, list), "
-                                "but actually we got (%s, %s)" % (str(type(q_offset)), str(type(i_offset))))
-            if not len(q_offset) == 2 and len(i_offset) == 2:
-                raise ValueError("Length of qc_offset and offset should be (2, 2), "
-                                 "but actually we got (%d, %d)" % (len(q_offset), len(i_offset)))
-            return 1 / (1 + math.sqrt((q_offset[0] - i_offset[0])**2 + (q_offset[1] - i_offset[1])**2))
+        from ..indexer.base import BaseChunkIndexer
+        if not isinstance(self._model, BaseChunkIndexer):
+            raise ServiceError(
+                'unsupported indexer, dont know how to use %s to handle this message' % self._model.__bases__)
 
-        vecs = blob2array(msg.request.search.query.chunk_embeddings)
-        q_offset = [c.offset_nd if msg.request.search.query.doc_type == 'IMAGE'
-                    else c.offset_1d for c in msg.request.search.query.chunks]
-        topk = msg.request.search.top_k
-        results = self._model.query(vecs, top_k=msg.request.search.top_k)
-        q_weights = [qc.weight for qc in msg.request.search.query.chunks]
-        for all_topks, qc_weight, qc_offset in zip(results, q_weights, q_offset):
-            for _doc_id, _offset, _weight, _relevance in all_topks:
-                r = msg.response.search.topk_results.add()
-                r.chunk.doc_id = _doc_id
-                r.chunk.weight = _weight
-                if msg.request.search.query.doc_type == 'IMAGE':
-                    r.chunk.offset_nd = _offset
-                    offset_relevance = _cal_offset_relevance(qc_offset, _offset)
-                else:
-                    r.chunk.offset_1d = _offset
-                    offset_relevance = 1
-                r.score = _weight * qc_weight * _relevance * offset_relevance
-                r.score_explained = '[chunk_score at doc: %d, offset: %d] = ' \
-                                    '(doc_chunk_weight: %.6f) * ' \
-                                    '(query_doc_chunk_relevance: %.6f) * ' \
-                                    '(query_doc_offset_relevance: %.6f) * ' \
-                                    '(query_chunk_weight: %.6f)' % (
-                                        _doc_id, _offset, _weight, _relevance, offset_relevance, qc_weight)
-            msg.response.search.top_k = topk
+        results = []
+        if not msg.request.search.query.chunks:
+            self.logger.warning('query contains no chunks!')
+        else:
+            results = self._model.query_and_score(msg.request.search.query.chunks, top_k=msg.request.search.top_k)
+
+        self._put_result_into_message(results, msg)
 
     @handler.register(gnes_pb2.Response.QueryResponse)
     def _handler_doc_search(self, msg: 'gnes_pb2.Message'):
-        if msg.response.search.level == gnes_pb2.Response.QueryResponse.DOCUMENT_NOT_FILLED:
-            doc_ids = [r.doc.doc_id for r in msg.response.search.topk_results]
-            docs = self._model.query(doc_ids)
-            for r, d in zip(msg.response.search.topk_results, docs):
-                if d is not None:
-                    # fill in the doc if this shard returns non-empty
-                    r.doc.CopyFrom(d)
-                    r.score *= d.weight
-                    r.score_explained = '{%s} * [doc: %d] (doc_weight: %.6f)' % (
-                        r.score_explained, d.doc_id, d.weight)
-            msg.response.search.level = gnes_pb2.Response.QueryResponse.DOCUMENT
-        else:
-            raise ServiceError('i dont know how to handle QueryResponse with %s level' % msg.response.search.level)
+        from ..indexer.base import BaseDocIndexer
+        if not isinstance(self._model, BaseDocIndexer):
+            raise ServiceError(
+                'unsupported indexer, dont know how to use %s to handle this message' % self._model.__bases__)
+
+        # check if chunk_indexer and doc_indexer has the same sorting order
+        if msg.response.search.is_big_score_similar is not None and \
+                msg.response.search.is_big_score_similar != self._model.is_big_score_similar:
+            raise ServiceError(
+                'is_big_score_similar is inconsistent. last topk-list: is_big_score_similar=%s, but '
+                'this indexer: is_big_score_similar=%s' % (
+                    msg.response.search.is_big_score_similar, self._model.is_big_score_similar))
+
+        # assume the doc search will change the whatever sort order the message has
+        msg.response.search.is_sorted = False
+        results = self._model.query_and_score(msg.response.search.topk_results)
+        self._put_result_into_message(results, msg)

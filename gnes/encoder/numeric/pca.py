@@ -13,8 +13,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# pylint: disable=low-comment-ratio
-
 
 import numpy as np
 
@@ -22,7 +20,53 @@ from ..base import BaseNumericEncoder
 from ...helper import get_perm, batching, get_optimal_sample_size, train_required
 
 
+class PCAEncoder(BaseNumericEncoder):
+    batch_size = 2048
+
+    def __init__(self, output_dim: int, whiten: bool=False, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.output_dim = output_dim
+        self.whiten = whiten
+        self.pca_components = None
+        self.mean = None
+
+
+    def post_init(self):
+        from sklearn.decomposition import IncrementalPCA
+        self.pca = IncrementalPCA(n_components=self.output_dim)
+
+
+    @batching
+    def train(self, vecs: np.ndarray, *args, **kwargs) -> None:
+        num_samples, num_dim = vecs.shape
+        if self.output_dim > num_samples:
+            if self.mean.size:
+                return
+            else:
+                raise ValueError('training PCA requires at least %d points, but %d was given' % (self.output_dim, num_samples))
+
+        assert self.output_dim < num_dim, 'PCA output dimension should < data dimension, received (%d, %d)' % (
+            self.output_dim, num_dim)
+
+        self.pca.partial_fit(vecs)
+
+        self.pca_components = np.transpose(self.pca.components_)
+        self.mean = self.pca.mean_.astype('float32')
+        self.explained_variance = self.pca.explained_variance_.astype('float32')
+
+
+    @train_required
+    @batching
+    def encode(self, vecs: np.ndarray, *args, **kwargs) -> np.ndarray:
+        X_transformed = np.matmul(vecs - self.mean, self.pca_components)
+        if self.whiten:
+            X_transformed /= np.sqrt(self.explained_variance)
+        return X_transformed
+
+
 class PCALocalEncoder(BaseNumericEncoder):
+    batch_size = 2048
+
     def __init__(self, output_dim: int, num_locals: int,
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -32,7 +76,6 @@ class PCALocalEncoder(BaseNumericEncoder):
         self.num_locals = num_locals
         self.pca_components = None
         self.mean = None
-        self.batch_size = 2048
 
     @batching(batch_size=get_optimal_sample_size, num_batch=1)
     def train(self, vecs: np.ndarray, *args, **kwargs) -> None:

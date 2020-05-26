@@ -5,9 +5,10 @@ from gnes.encoder.base import BaseEncoder, PipelineEncoder
 
 
 class DummyTFEncoder(BaseEncoder):
+    is_trained = True
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.is_trained = True
 
     def post_init(self):
         import tensorflow as tf
@@ -28,8 +29,9 @@ class TestLoadDumpPipeline(unittest.TestCase):
     def test_base(self):
         a = BaseEncoder.load_yaml(self.yaml_path)
         self.assertFalse(a.is_trained)
-        # simulate training
-        a.is_trained = True
+
+        for c in a.components:
+            c.is_trained = True
         a.dump()
         os.path.exists(self.dump_path)
 
@@ -43,7 +45,7 @@ class TestLoadDumpPipeline(unittest.TestCase):
         d1.name = ''
         d2.name = ''
         d3 = PipelineEncoder()
-        d3.component = lambda: [d1, d2]
+        d3.components = lambda: [d1, d2]
         d3.name = 'dummy-pipeline'
         d3.work_dir = './'
         d3.dump()
@@ -64,33 +66,32 @@ class TestLoadDumpPipeline(unittest.TestCase):
         self.assertTrue(d2.is_trained)
 
         d3 = PipelineEncoder()
-        d3.component = lambda: [d1, d2]
+        d3.components = lambda: [d1, d2]
         self.assertEqual(d3.encode(1), 3)
-        self.assertFalse(d3.is_trained)
-        self.assertTrue(d3.component[0].is_trained)
-        self.assertTrue(d3.component[1].is_trained)
+        self.assertTrue(d3.is_trained)
+        self.assertTrue(d3.components[0].is_trained)
+        self.assertTrue(d3.components[1].is_trained)
 
         d3.dump()
         d31 = BaseEncoder.load(d3.dump_full_path)
-        self.assertFalse(d31.is_trained)
-        self.assertTrue(d31.component[0].is_trained)
-        self.assertTrue(d31.component[1].is_trained)
+        self.assertTrue(d3.is_trained)
+        self.assertTrue(d31.components[0].is_trained)
+        self.assertTrue(d31.components[1].is_trained)
 
         d3.work_dir = self.dirname
         d3.name = 'dummy-pipeline'
-        d3.is_trained = True
         d3.dump_yaml()
         d3.dump()
 
         d4 = PipelineEncoder.load(d3.dump_full_path)
         self.assertTrue(d4.is_trained)
-        self.assertTrue(d4.component[0].is_trained)
-        self.assertTrue(d4.component[1].is_trained)
+        self.assertTrue(d4.components[0].is_trained)
+        self.assertTrue(d4.components[1].is_trained)
 
         d4 = PipelineEncoder.load_yaml(d3.yaml_full_path)
         self.assertTrue(d4.is_trained)
-        self.assertTrue(d4.component[0].is_trained)
-        self.assertTrue(d4.component[1].is_trained)
+        self.assertTrue(d4.components[0].is_trained)
+        self.assertTrue(d4.components[1].is_trained)
 
         self.assertEqual(d4.encode(4), 6)
 

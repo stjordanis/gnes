@@ -13,29 +13,26 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# pylint: disable=low-comment-ratio
-
 
 from typing import List
 
 import numpy as np
 
 from ..base import BaseTextEncoder
-from ...helper import batching, pooling_simple
+from ...helper import batching, pooling_simple, as_numpy_array
 
 
 class Word2VecEncoder(BaseTextEncoder):
+    is_trained = True
+
     def __init__(self, model_dir: str,
                  skiprows: int = 1,
-                 batch_size: int = 64,
                  dimension: int = 300,
                  pooling_strategy: str = 'REDUCE_MEAN', *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_dir = model_dir
         self.skiprows = skiprows
-        self.batch_size = batch_size
         self.pooling_strategy = pooling_strategy
-        self.is_trained = True
         self.dimension = dimension
 
     def post_init(self):
@@ -55,6 +52,7 @@ class Word2VecEncoder(BaseTextEncoder):
         self.cn_tokenizer = Tokenizer()
 
     @batching
+    @as_numpy_array
     def encode(self, text: List[str], *args, **kwargs) -> np.ndarray:
         # tokenize text
         batch_tokens = [self.cn_tokenizer.tokenize(sent) for sent in text]
@@ -64,4 +62,4 @@ class Word2VecEncoder(BaseTextEncoder):
             _layer_data = [self.word2vec_df.get(token, self.empty) for token in tokens]
             pooled_data.append(pooling_simple(_layer_data, self.pooling_strategy))
 
-        return np.array(pooled_data).astype(np.float32)
+        return pooled_data

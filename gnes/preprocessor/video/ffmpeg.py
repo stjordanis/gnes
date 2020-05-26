@@ -13,19 +13,23 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+import random
 from typing import List
 
 import numpy as np
 
-from .base import BaseVideoPreprocessor
-from ..helper import get_video_frames, phash_descriptor
-from ...proto import gnes_pb2, array2blob
+from ..base import BaseVideoPreprocessor, RawChunkPreprocessor
+from ..helper import split_video_frames, phash_descriptor
+from ..io_utils import video as video_util
+from ...proto import gnes_pb2, array2blob, blob2array
 
 
 class FFmpegPreprocessor(BaseVideoPreprocessor):
 
     def __init__(self,
-                 frame_size: str = "192*168",
+                 frame_size: str = '192:168',
+                 frame_rate: int = 10,
+                 frame_num: int = -1,
                  duplicate_rm: bool = True,
                  use_phash_weight: bool = False,
                  phash_thresh: int = 5,
@@ -33,11 +37,11 @@ class FFmpegPreprocessor(BaseVideoPreprocessor):
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.frame_size = frame_size
+        self.frame_rate = frame_rate
+        self.frame_num = frame_num
         self.phash_thresh = phash_thresh
         self.duplicate_rm = duplicate_rm
         self.use_phash_weight = use_phash_weight
-
-        self._ffmpeg_kwargs = kwargs
 
     def apply(self, doc: 'gnes_pb2.Document') -> None:
         super().apply(doc)
@@ -45,12 +49,8 @@ class FFmpegPreprocessor(BaseVideoPreprocessor):
         # video could't be processed from ndarray!
         # only bytes can be passed into ffmpeg pipeline
         if doc.raw_bytes:
-            frames = get_video_frames(
-                doc.raw_bytes,
-                s=self.frame_size,
-                vsync=self._ffmpeg_kwargs.get("vsync", "vfr"),
-                vf=self._ffmpeg_kwargs.get("vf", "select=eq(pict_type\\,I)"))
-
+            frames = video_util.capture_frames(input_data=doc.raw_bytes, scale=self.frame_size,
+                                               fps=self.frame_rate, vframes=self.frame_num)
             # remove dupliated key frames by phash value
             if self.duplicate_rm:
                 frames = self.duplicate_rm_hash(frames)
@@ -64,7 +64,7 @@ class FFmpegPreprocessor(BaseVideoPreprocessor):
                 c = doc.chunks.add()
                 c.doc_id = doc.doc_id
                 c.blob.CopyFrom(array2blob(chunk))
-                c.offset_1d = ci
+                c.offset = ci
                 c.weight = weight[ci]
 
         else:
@@ -106,3 +106,92 @@ class FFmpegPreprocessor(BaseVideoPreprocessor):
                 ret.append((i, h))
 
         return [images[_[0]] for _ in ret]
+
+
+class FFmpegVideoSegmentor(BaseVideoPreprocessor):
+    def __init__(self,
+                 frame_size: str = '192:168',
+                 frame_rate: int = 10,
+                 frame_num: int = -1,
+                 segment_method: str = 'cut_by_frame',
+                 segment_interval: int = -1,
+                 segment_num: int = 3,
+                 max_frames_per_doc: int = -1,
+                 use_image_input: bool = False,
+                 splitter: str = '__split__',
+                 *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self.frame_size = frame_size
+        self.frame_rate = frame_rate
+        self.frame_num = frame_num
+        self.segment_method = segment_method
+        self.segment_interval = segment_interval
+        self.segment_num = segment_num
+        self.max_frames_per_doc = max_frames_per_doc
+        self.splitter = splitter
+        self.use_image_input = use_image_input
+
+    def apply(self, doc: 'gnes_pb2.Document') -> None:
+        super().apply(doc)
+        from sklearn.cluster import KMeans
+        if doc.raw_bytes:
+            if self.use_image_input:
+                frames = split_video_frames(doc.raw_bytes, self.splitter)
+            else:
+                frames = video_util.capture_frames(input_data=doc.raw_bytes, scale=self.frame_size,
+                                                   fps=self.frame_rate, vframes=self.frame_num)
+            if self.max_frames_per_doc > 0:
+                random_id = random.sample(range(len(frames)),
+                                          k=min(self.max_frames_per_doc, len(frames)))
+                frames = [frames[i] for i in sorted(random_id)]
+
+            sub_videos = []
+            if len(frames) >= 1:
+                # cut by frame: should specify how many frames to cut
+                if self.segment_method == 'cut_by_frame':
+                    if self.segment_interval == -1:
+                        sub_videos = [frames]
+                    else:
+                        sub_videos = [frames[_: _ + self.segment_interval]
+                                      for _ in range(0, len(frames), self.segment_interval)]
+                # cut by num: should specify how many chunks for each doc
+                elif self.segment_method == 'cut_by_num':
+                    if self.segment_num >= 2:
+                        _interval = len(frames) // (self.segment_num - 1)
+                        sub_videos = [frames[_: _ + _interval]
+                                      for _ in range(0, len(frames), _interval)]
+                    else:
+                        sub_videos = [frames]
+
+                # cut by clustering: params required
+                #   segment_num
+                elif self.segment_method == 'cut_by_clustering':
+                    if self.segment_num >= 2:
+                        hash_v = [phash_descriptor(_).hash for _ in frames]
+                        hash_v = np.array(hash_v, dtype=np.int32).reshape([len(hash_v), -1])
+                        label_v = KMeans(n_clusters=self.segment_num).fit_predict(hash_v)
+                        sub_videos = [[frames[i] for i, j in enumerate(label_v) if j == _] for _ in
+                                      range(self.segment_num)]
+                    else:
+                        sub_videos = [frames]
+
+                for ci, chunk in enumerate(sub_videos):
+                    c = doc.chunks.add()
+                    c.doc_id = doc.doc_id
+                    c.blob.CopyFrom(array2blob(np.array(chunk, dtype=np.uint8)))
+                    c.offset = ci
+                    c.weight = 1 / len(sub_videos)
+
+            else:
+                self.logger.warning('bad document: no key frames extracted')
+        else:
+            self.logger.error('bad document: "raw_bytes" is empty!')
+
+
+class GifChunkPreprocessor(RawChunkPreprocessor, BaseVideoPreprocessor):
+    @staticmethod
+    def _parse_chunk(chunk: 'gnes_pb2.Chunk', *args, **kwargs):
+        from ..io_utils import gif as gif_util
+
+        return gif_util.encode_video(blob2array(chunk.blob), frame_rate=10)

@@ -20,7 +20,7 @@ All other YAML files, including the docker-compose YAML config and Kubernetes co
 
 * [Component-wise YAML specification](#component-wise-yaml-specification)
 * [`!CLS` specification](#--cls--specification)
-* [`parameter` specification](#-parameter--specification)
+* [`parameters` specification](#-parameters--specification)
   - [Use `args` and `kwargs` to simplify the constructor](#use--args--and--kwargs--to-simplify-the-constructor)
 * [`gnes_config` specification](#-gnes-config--specification)
 * [Every component can be described with YAML in GNES](#every-component-can-be-described-with-yaml-in-gnes)
@@ -36,14 +36,14 @@ Preprocessor, encoder, indexer and router are fundamental components of GNES. Th
 |Argument| Type | Description|
 |---|---|---|
 | `!CLS` | str | choose from all class names registered in GNES |
-| `parameter` | map/dict | a list of key-value pairs that `CLS.__init__()` accepts|
+| `parameters` | map/dict | a list of key-value pairs that `CLS.__init__()` accepts|
 | `gnes_config`| map/dict | a list of key-value pairs for GNES |
 
 Let's take a look an example:
 
 ```yaml
-!BasePytorchEncoder
-parameter:
+!TorchvisionEncoder
+parameters:
   model_dir: ${VGG_MODEL}
   model_name: vgg16
   layers:
@@ -56,7 +56,7 @@ gnes_config:
   name: my-awesome-vgg
 ```
 
-In this example, we define a `BasePytorchEncoder` that loads a pretrained VGG16 model from the path`${VGG_MODEL}`. We then label this component as trained via `is_trained: true` and set its name to `my-awesome-vgg`.
+In this example, we define a `TorchvisionEncoder` that loads a pretrained VGG16 model from the path`${VGG_MODEL}`. We then label this component as trained via `is_trained: true` and set its name to `my-awesome-vgg`.
 
 ## `!CLS` specification
 
@@ -65,14 +65,13 @@ In this example, we define a `BasePytorchEncoder` that loads a pretrained VGG16 
 |`!CLS`| Component Type |
 |---|---|
 |`!BasePreprocessor`|Preprocessor|
-|`!TextPreprocessor`|Preprocessor|
+|`!SentSplitPreprocessor`|Preprocessor|
 |`!BaseImagePreprocessor`|Preprocessor|
 |`!BaseTextPreprocessor`|Preprocessor|
-|`!BaseSlidingPreprocessor`|Preprocessor|
 |`!VanillaSlidingPreprocessor`|Preprocessor|
 |`!WeightedSlidingPreprocessor`|Preprocessor|
 |`!SegmentPreprocessor`|Preprocessor|
-|`!BaseUnaryPreprocessor`|Preprocessor|
+|`!UnaryPreprocessor`|Preprocessor|
 |`!BaseVideoPreprocessor`|Preprocessor|
 |`!FFmpegPreprocessor`|Preprocessor|
 |`!ShotDetectPreprocessor`|Preprocessor|
@@ -94,7 +93,7 @@ In this example, we define a `BasePytorchEncoder` that loads a pretrained VGG16 
 |`!CompositionalEncoder`|Encoder|
 |`!PipelineEncoder`|Encoder|
 |`!HashEncoder`|Encoder|
-|`!BasePytorchEncoder`|Encoder|
+|`!TorchvisionEncoder`|Encoder|
 |`!TFInceptionEncoder`|Encoder|
 |`!CVAEEncoder`|Encoder|
 |`!FaissIndexer`|Indexer|
@@ -110,15 +109,15 @@ In this example, we define a `BasePytorchEncoder` that loads a pretrained VGG16 
 |`!BaseRouter`|Router|
 |`!BaseMapRouter`|Router|
 |`!BaseReduceRouter`|Router|
-|`!ChunkReduceRouter`|Router|
-|`!DocReduceRouter`|Router|
+|`!ChunkToDocRouter`|Router|
+|`!DocFillRouter`|Router|
 |`!ConcatEmbedRouter`|Router|
 |`!PublishRouter`|Router|
 |`!DocBatchRouter`|Router|
 
-## `parameter` specification
+## `parameters` specification
 
-The key-value pair defined in `parameter` is basically a map of the arguments defined in the constructor of `!CLS`. Let's look at the signature of the constructor `BasePytorchEncoder` as an example:
+The key-value pair defined in `parameters` is basically a map of the arguments defined in the constructor of `!CLS`. Let's look at the signature of the constructor `TorchvisionEncoder` as an example:
 
 <table>
 <tr>
@@ -131,7 +130,6 @@ def __init__(self, model_name: str,
                  layers: List[str],
                  model_dir: str,
                  batch_size: int = 64,
-                 use_cuda: bool = False,
                  *args, **kwargs):
   # do model init...
   # ...
@@ -139,8 +137,8 @@ def __init__(self, model_name: str,
 </td>
 <td>
 <pre lang="yaml">
-!BasePytorchEncoder
-parameter:
+!TorchvisionEncoder
+parameters:
   model_dir: ${VGG_MODEL}
   model_name: vgg16
   layers:
@@ -184,7 +182,7 @@ class BertEncoder(BaseTextEncoder):
 <td>
 <pre lang="yaml">
 !BertEncoder
-parameter:
+parameters:
   kwargs:
     port: $BERT_CI_PORT
     port_out: $BERT_CI_PORT_OUT
@@ -216,8 +214,8 @@ Note that how we defines a map under `kwargs` to describe the arguments, they wi
 The examples above are all about encoder. In fact, every component including encoder, preprocessor, router, indexer can all be described with YAML and loaded to GNES. For example,
 
 ```yaml
-!TextPreprocessor
-parameter:
+!SentSplitPreprocessor
+parameters:
   start_doc_id: 0
   random_doc_id: True
   deliminator: "[.。！？!?]+"
@@ -229,7 +227,7 @@ Sometime it could be quite simple, e.g.
 
 ```yaml
 !PublishRouter
-parameter:
+parameters:
   num_part: 2
 ```
 
@@ -268,9 +266,9 @@ To define a `PipelineEncoder`, you just need to sort the encoders in the right o
 
 ```yaml
 !PipelineEncoder
-component:
-  - !BasePytorchEncoder
-    parameter:
+components:
+  - !TorchvisionEncoder
+    parameters:
       model_dir: /ext_data/image_encoder
       model_name: resnet50
       layers:
@@ -287,13 +285,13 @@ component:
     gnes_config:
       is_trained: true
   - !PCALocalEncoder
-    parameter:
+    parameters:
       output_dim: 200
       num_locals: 10
     gnes_config:
       batch_size: 2048
   - !PQEncoder
-    parameter:
+    parameters:
       cluster_per_byte: 20
       num_bytes: 10
 gnes_config:

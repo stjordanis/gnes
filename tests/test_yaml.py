@@ -36,8 +36,8 @@ class dummyPipeline(PipelineEncoder):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.component = lambda: [foo1(*args, **kwargs),
-                                  foo2(*args, **kwargs), ]
+        self.components = lambda: [foo1(*args, **kwargs),
+                                   foo2(*args, **kwargs), ]
 
 
 class TestYaml(unittest.TestCase):
@@ -91,7 +91,7 @@ class TestYaml(unittest.TestCase):
     def test_load(self):
         with open(self.dump_path, 'w') as fp:
             fp.write("!PipelineEncoder\n\
-                                parameter:\n\
+                                parameters:\n\
                                   kwargs:\n\
                                     a: 23\n\
                                     b: '32'\n\
@@ -107,7 +107,7 @@ class TestYaml(unittest.TestCase):
 
         with open(self.dump_path, 'w') as fp:
             fp.write("!PipelineEncoder\n\
-                                parameter:\n\
+                                parameters:\n\
                                   args:\n\
                                     - 23\n\
                                     - '32'\n\
